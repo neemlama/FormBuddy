@@ -64,15 +64,7 @@ See `docs/safety.md` (if present) and audit spec in `agent/tools/audit_log.py`.
 
 ## Demo
 
-**Live demo (AgentCore Runtime, us-east-1):** `arn:aws:bedrock-agentcore:us-east-1:557723775608:runtime/formbuddy-UC3u9aHTke` — invoke with any `session_id` + `message` (DynamoDB-backed, same approval boundary as local):
-
-```bash
-aws bedrock-agentcore invoke-agent-runtime --region us-east-1 \
-  --agent-runtime-arn arn:aws:bedrock-agentcore:us-east-1:557723775608:runtime/formbuddy-UC3u9aHTke \
-  --payload '{"session_id":"judge-1","message":"Hi, what do you do?"}' out.json
-```
-
-Cloud fill demo target: `https://formbuddy-demo-rsvp.s3.amazonaws.com/index.html` (paste it + your details, review the proposal, Approve — AgentCore Browser fills and submits).
+**Live demo:** deployed on demand to AgentCore Runtime for judging (link + invoke command shared privately with judges — video shows the live AgentCore Browser run).
 
 **Local demo form (no real submission):** `demo/mock-rsvp/index.html` — a fictional "Kathmandu Tech Meetup RSVP / Ward-style form" hosted via `frontend/` or S3, used for repeatable testing of all field types (text, email, tel, number, select, textarea, checkbox). After submit it shows `confirmation.html` with a synthetic confirmation code.
 

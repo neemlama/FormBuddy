@@ -41,7 +41,13 @@ from agent.orchestrator import build_agent
 from agent.tools.audit_log import read_local_entries
 from agent.tools.file_store import delete_file, get_file_bytes, get_file_path, list_files, save_file
 from agent.tools.profile_store import load_profile, profile_as_text, save_profile
-from agent.tools.proposal import record_extension_fill_result, resume_after_approval, retry_failed_session
+from agent.tools.proposal import (
+    begin_cloud_approval,
+    finish_cloud_fill,
+    record_extension_fill_result,
+    resume_after_approval,
+    retry_failed_session,
+)
 from agent.tools.session_store import get_session
 
 app = FastAPI(title="FormBuddy API")
@@ -91,6 +97,22 @@ def chat(req: ChatRequest) -> ChatResponse:
         vault_lines = [f"{m['stored_as']} ({m['mime']}, {m['size']} bytes)" for m in vault[:20]]
         vault_block = "\n\nFILE_VAULT:\n" + "\n".join(vault_lines) + "\n(Use stored_as as value for file fields when label matches; e.g. 'Citizenship Photo' -> citizenship.jpg if present)"
     prompt = f"session_id: {req.session_id}{profile_block}{vault_block}\n\n{req.message}"
+    # Ground the agent in the real approval state so a chat "yes" can never
+    # be mistaken for (or hallucinated into) a submission. Live 2026-09-13:
+    # agent forged human approval + submitted messages while the real fill
+    # was still running, and the UI still showed the Approve button.
+    _state = get_session(req.session_id)
+    if _state is not None:
+        _st = _state.get("status", "none")
+        _ground = {
+            "pending_approval": "SESSION_STATE: status=pending_approval. A proposal awaits the Approve & Submit button click. A chat yes/approve changes nothing — direct the user to the button.",
+            "approved": "SESSION_STATE: status=approved. The user already clicked Approve; cloud fill is running in background. Tell them to wait and watch Agent Activity. Never claim submitted.",
+            "submitted": "SESSION_STATE: status=submitted. The fill already completed. Report that plainly; offer further help.",
+            "submission_failed": "SESSION_STATE: status=submission_failed. Direct the user to the Retry submission button or New Conversation. Never claim submitted.",
+            "rejected": "SESSION_STATE: status=rejected. No submission was made. Offer New Conversation.",
+        }.get(_st)
+        if _ground:
+            prompt += f"\n\n{_ground}"
     if req.page_html:
         # Marker string the orchestrator's system prompt is instructed to
         # look for -- selects inspect_provided_html + fill_mode="extension"
@@ -131,6 +153,23 @@ class DecisionRequest(BaseModel):
 
 @app.post("/api/session/{session_id}/decide")
 def decide(session_id: str, req: DecisionRequest) -> dict[str, Any]:
+    import threading
+
+    # Fast path: cloud approvals run the 1-2 min browser fill in a
+    # background thread so the request returns instantly and the UI can
+    # poll progress instead of hanging on an open HTTP call.
+    if req.decision == "approved":
+        session = get_session(session_id)
+        if session is not None and session["status"] == "pending_approval" and session.get("proposal", {}).get("fill_mode", "cloud") == "cloud":
+            try:
+                begin_cloud_approval(session_id, note=req.note)
+            except (KeyError, ValueError) as e:
+                code = 404 if isinstance(e, KeyError) else 409
+                raise HTTPException(status_code=code, detail=str(e)) from e
+            thread = threading.Thread(target=finish_cloud_fill, args=(session_id,), daemon=True)
+            thread.start()
+            return {"message": "Approved — filling in background. Watch Agent Activity for progress.", "status": "approved"}
+
     try:
         message = resume_after_approval(session_id, decision=req.decision, note=req.note)
     except KeyError as e:

@@ -1,71 +1,51 @@
-%% FormBuddy Architecture — Good Neighbor track
-%% Render with https://mermaid.live or `mmdc -i architecture.mmd -o architecture.png`
+%% FormBuddy Architecture v2 — Good Neighbor track (video-ready)
+%% Render: https://mermaid.live or `mmdc -i architecture.mmd -o architecture.png`
+%% Design: 3 layers (See -> Decide -> Act), approval gate as diamond, two lanes.
+
 flowchart TB
-    subgraph User[User / Community]
-        U1[Chat input\nURL + profile\n+ doc photo]
-        U2[Open tab with form\n+ side panel profile]
-        U3[Human approval\nApprove / Reject]
+    subgraph L1["LAYER 1 — SEE (read the real form)"]
+        direction LR
+        U1["User gives URL\n+ profile + doc photo"]
+        U2["User opens form tab\n+ extension profile"]
+        WEB["Web Chat UI\nfrontend/"]
+        EXT["Chrome Extension\nsidepanel + background.js"]
+        INS1["inspect_form\nHaiku + AgentCore Browser"]
+        INS2["inspect_provided_html\nHaiku, no browser"]
+        DOC["document_parser\nBedrock vision"]
+
+        U1 --> WEB
+        U2 --> EXT
+        WEB --> INS1
+        EXT --> INS2
+        WEB --> DOC
     end
 
-    subgraph Frontend[Frontend Layer]
-        WEB[Web Chat UI\nfrontend/index.html\nfrontend/app.js\n+ local profile vault]
-        EXT[Chrome Extension\nsidepanel.html/.js\nbackground.js\nchrome.storage.local]
+    subgraph L2["LAYER 2 — DECIDE (human approval gate)"]
+        direction LR
+        ORCH["Orchestrator\nStrands Agent (Haiku default)\nmatch -> ask-if-missing -> log -> propose"]
+        PROP["propose_form_fill\nrefuses if required empty"]
+        GATE{"Human approves?\nApprove / Reject"}
+        ORCH --> PROP --> GATE
     end
 
-    subgraph API[FastAPI Backend\napi/main.py]
-        CHAT["POST /api/chat\n(session_id, message,\npage_html?)"]
-        SESS["GET /api/session/{id}\nPOST /decide\nPOST /extension-result\nGET /audit"]
-        CORS[CORS * for extension]
+    subgraph L3["LAYER 3 — ACT (only after Approve)"]
+        direction LR
+        CLOUD["Cloud lane\nAgentCore Browser\nfill + SUBMIT"]
+        EXT2["Extension lane\nlocal DOM fill\nNO submit (user clicks)"]
+        STORE[("Session + Audit\nlocal JSON / DynamoDB\nMemory swap-in")]
+        CLOUD --> STORE
+        EXT2 --> STORE
     end
 
-    subgraph Agent[Strands Orchestrator\nagent/orchestrator.py\nSonnet-class]
-        ORCH{Orchestrator Agent\nsystem_prompt}
-        INS1[inspect_form\nHaiku + AgentCore Browser\nform_inspector.py:130]
-        INS2[inspect_provided_html\nHaiku, no browser\nform_inspector.py:168]
-        DOC[document_parser\nBedrock vision\nHaiku/Sonnet\nform_inspector.py:104]
-        LOG[log_decision\naudit_log.py:54]
-        PROP[propose_form_fill\nproposal.py:46\nrefuses if required empty]
-        RESUME[resume_after_approval\nproposal.py:147]
-        EXTRES[record_extension_fill_result\nproposal.py:209]
-    end
-
-    subgraph Browser[Execution Layer]
-        ACB[AgentCore Browser\nfill_and_submit_form\nform_filler.py:87\nHaiku + browser tool]
-        DOM[Extension DOM fill\nbackground.js:28\nfillFieldsInPage\nno submit]
-    end
-
-    subgraph State[State & Audit\nDual-backend]
-        SESS_STORE[(Session Store\nsession_store.py\nlocal JSON / DynamoDB\nor AgentCore Memory)]
-        AUDIT[(Audit Log\n audit_log.py\nlocal JSONL / DynamoDB)]
-    end
-
-    U1 --> WEB --> CHAT
-    U2 --> EXT --> CHAT
-    CHAT --> ORCH
-    ORCH -->|URL only| INS1
-    ORCH -->|PAGE_HTML_PROVIDED| INS2
-    ORCH -->|image_path| DOC
-    ORCH --> LOG
-    ORCH --> PROP
-    PROP --> SESS_STORE
-    PROP --> LOG
-    LOG --> AUDIT
-    SESS_STORE --> SESS
-    AUDIT --> SESS
-
-    U3 --> SESS
-    SESS --> RESUME
-    RESUME -->|fill_mode=cloud| ACB
-    RESUME -->|fill_mode=extension| EXTRES
-    EXT -->|FILL_FIELDS| DOM
-    DOM -->|report| EXTRES
-    ACB --> SESS_STORE
-    ACB --> AUDIT
-    EXTRES --> SESS_STORE
-    EXTRES --> AUDIT
+    INS1 --> ORCH
+    INS2 --> ORCH
+    DOC --> ORCH
+    GATE -->|Approved, cloud| CLOUD
+    GATE -->|Approved, extension| EXT2
+    GATE -->|Rejected| STORE
 
     style ORCH fill:#0f766e,color:#fff
     style PROP fill:#d97706,color:#fff
-    style RESUME fill:#be123c,color:#fff
-    style ACB fill:#1d4ed8,color:#fff
-    style DOM fill:#1d4ed8,color:#fff
+    style GATE fill:#be123c,color:#fff
+    style CLOUD fill:#1d4ed8,color:#fff
+    style EXT2 fill:#1d4ed8,color:#fff

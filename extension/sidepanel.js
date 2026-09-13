@@ -99,7 +99,7 @@ $("file-upload").addEventListener("click", async ()=>{
   $("file-upload").disabled=true;
   for(const f of inp.files){
     const fd=new FormData(); fd.append("file", f);
-    try{ const r=await fetch(`${BACKEND_URL}/api/files/upload`,{method:"POST", body: fd}); note.textContent= r.ok ? "Uploaded "+f.name+" ✅" : "Failed "+f.name; }catch(e){ note.textContent="Error "+e; }
+    try{ const r=await fetch(`${BACKEND_URL}/api/files/upload`,{method:"POST", body: fd}); note.textContent= r.ok ? "Uploaded "+f.name+" ✅" : "Failed "+f.name+": HTTP "+r.status; }catch(e){ note.textContent="Backend not reachable at "+BACKEND_URL+" — start it: uv run uvicorn api.main:app --port 8000 ("+e+")"; }
   }
   inp.value=""; $("file-upload").disabled=false;
   setTimeout(()=>note.hidden=true,2500);
@@ -335,12 +335,37 @@ $("authorize-btn").addEventListener("click", async () => {
       }),
     });
 
+    // Post-report verify: Live Server (:5500) reloads the tab when the
+    // backend writes session/audit files, wiping a just-reported "success".
+    // Re-read one filled value AFTER the report POST to catch it.
+    let reloadWarning = "";
+    try {
+      const probe = (fieldsForFill || []).find((f) => f.value !== false && ["text", "email", "tel", "number", "textarea"].includes(f.field_type) && f.selector);
+      const onLiveServer = /:5500(\/|$)/.test(filledTabUrl || "");
+      if (probe) {
+        const verify = await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ type: "VERIFY_VALUES", selectors: [probe.selector] }, (resp) => {
+            if (chrome.runtime.lastError) return resolve(null);
+            resolve(resp && resp.ok ? resp.values : null);
+          });
+        });
+        const back = verify && verify[0];
+        if (back && back.present && (back.value === null || back.value === "")) {
+          reloadWarning = `\n\n⚠️ The page appears to have RELOADED after filling (${probe.label} is now empty). Cause: VS Code Live Server (:5500) reloads on backend file writes. Fix: stop Live Server, run: python -m http.server 8001 --directory demo/mock-rsvp — then open http://localhost:8001 and Analyze again.`;
+        } else if (onLiveServer) {
+          reloadWarning = `\n\n⚠️ You are on Live Server (:5500), which can wipe fills by auto-reloading. If the form looks empty, re-serve with: python -m http.server 8001 --directory demo/mock-rsvp → http://localhost:8001`;
+        }
+      } else if (/:5500(\/|$)/.test(filledTabUrl || "")) {
+        reloadWarning = `\n\n⚠️ You are on Live Server (:5500), which can wipe fills by auto-reloading. If the form looks empty, re-serve with: python -m http.server 8001 --directory demo/mock-rsvp → http://localhost:8001`;
+      }
+    } catch {}
+
     if (allOk) {
       const extraAuto = autoFiles.length ? `\n\n📎 ${autoFiles.length} file(s) auto-attached from vault: ${autoFiles.map(f=>f.label).join(", ")} — check the form shows them, then click Submit.` : "";
       const extraManual = manualFiles.length ? `\n\n⚠️ ${manualFiles.length} file field(s) highlighted in orange — vault file not found, please click "Add file" and pick: ${manualFiles.map(f=>f.label+": "+(lastKnownFields.find(x=>x.label===f.label)?.value||"")).join(", ")}. Upload to vault next time for auto-attach.` : "";
       showResult(
         true,
-        `✅ ${filled} field(s) filled in your tab. Nothing was submitted — please review the form and click Submit yourself when ready.` + extraAuto + extraManual + (filledTabUrl ? `\n\nFilled tab: ${filledTabUrl} — if this is not the tab you are looking at, switch to it. Fields flash green briefly.` : "") + diagLine
+        `✅ ${filled} field(s) filled in your tab. Nothing was submitted — please review the form and click Submit yourself when ready.` + extraAuto + extraManual + (filledTabUrl ? `\n\nFilled tab: ${filledTabUrl} — if this is not the tab you are looking at, switch to it. Fields flash green briefly.` : "") + diagLine + reloadWarning
       );
     } else {
       showResult(false, `⚠️ Some fields could not be filled: ${notes}`);

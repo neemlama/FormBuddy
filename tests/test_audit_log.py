@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from agent.tools.audit_log import log_decision, read_local_entries
+from agent.tools.audit_log import log_decision, log_system_decision, read_local_entries
 
 
 @pytest.fixture(autouse=True)
@@ -32,11 +32,20 @@ def test_normal_entry_round_trips_with_generated_fields():
 
 def test_multiple_entries_append_not_overwrite():
     log_decision(session_id="s1", actor="agent", action="a1", detail={})
-    log_decision(session_id="s1", actor="human", action="a2", detail={}, requires_human_approval=True)
+    log_system_decision(session_id="s1", actor="human", action="a2", detail={}, requires_human_approval=True)
     log_decision(session_id="s2", actor="agent", action="a3", detail={})
 
     assert len(read_local_entries("s1")) == 2
     assert len(read_local_entries()) == 3  # unfiltered returns all sessions
+
+
+def test_agent_tool_refuses_human_actor():
+    # Live 2026-09-13: orchestrator forged human approval entries on chat
+    # "yes" while the real fill was still running. The agent tool must
+    # refuse actor="human" and write nothing.
+    result = log_decision(session_id="s1", actor="human", action="submission_approved", detail={})
+    assert result["ok"] is False
+    assert read_local_entries("s1") == []
 
 
 def test_requires_human_approval_flag_is_recorded_not_enforced():

@@ -79,6 +79,39 @@ def log_decision(
     Returns:
         The full logged entry, including its generated entry_id and timestamp.
     """
+    if actor == "human":
+        # Live 2026-09-13: the orchestrator forged human approval +
+        # submission_completed entries when the user typed "yes" in chat,
+        # while the real fill was still running. Agents must never log as
+        # human — real human actions are recorded by proposal.py via
+        # log_system_decision() when the Approve button is clicked.
+        return {
+            "ok": False,
+            "error": "Agents cannot log human actions. Reply directing the user "
+            "to click the Approve & Submit button — that click is the approval.",
+        }
+    return log_system_decision(
+        session_id=session_id,
+        actor=actor,
+        action=action,
+        detail=detail,
+        requires_human_approval=requires_human_approval,
+    )
+
+
+def log_system_decision(
+    session_id: str,
+    actor: str,
+    action: str,
+    detail: dict[str, Any],
+    requires_human_approval: bool = False,
+) -> dict[str, Any]:
+    """Non-tool audit writer for backend code (proposal.py).
+
+    Same record shape as log_decision but callable for genuine human events
+    (Approve button clicks, extension reports) that the agent tool above
+    deliberately refuses.
+    """
     entry = {
         "entry_id": str(uuid.uuid4()),
         "session_id": session_id,

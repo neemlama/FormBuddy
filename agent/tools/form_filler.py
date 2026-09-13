@@ -75,6 +75,7 @@ def _build_task_prompt(url: str, fields: list[dict[str, Any]], submit_selector: 
         "",
         "Fill in the following fields, in order. Be precise about field_type:",
         "  - text/email/tel/number/textarea: use the type action on the given selector. For Google Forms div[role=textbox], type into it or use evaluate to set textContent and dispatch input+change.",
+        "    Google Forms text validation (live 2026-09-13: email showed 'This is a required question' after typing): after typing into ANY Google Forms text/email/tel field, ALWAYS dispatch input+change events via evaluate on that element, then verify with get_text that the value stuck. If validation still flags it, click into the field first, clear it, re-type slowly, dispatch events again. Never click submit while a required question shows an error — fix the field first.",
         "  - date: if input[type=date] exists, type YYYY-MM-DD; if Google Forms shows 3 inputs (Month/Day/Year), type month into first, day into second, year into third (parse value like 2026-09-03 or 9/3/2026 accordingly).",
         "  - time: if input[type=time] exists, type HH:MM (24h, e.g. 11am -> 11:00, 3:30 pm -> 15:30); if Google Forms shows hour/minute + AM/PM dropdown, type hour into first input, minute into second, then click the AM/PM listbox option.",
         "  - select/radio/rating/linear_scale: click the matching option where data-value or visible text equals the value (case-insensitive). For Google Forms, search inside the same [role=listitem] for [role=radio][data-value] or [role=option]. For linear_scale/rating numeric (e.g. 4), click the radio whose data-value is that number.",
@@ -86,6 +87,7 @@ def _build_task_prompt(url: str, fields: list[dict[str, Any]], submit_selector: 
         "  - If a selector contains :nth-child or looks stale, fall back to label text: find [role=listitem] containing the label, then act inside it.",
         "",
         "If a selector is not found, search by the label text inside [role=listitem] as fallback before reporting failure. Never repeat a click that closed the browser — re-init and continue instead.",
+        "Be fast: fill text fields back-to-back without re-reading the page between each. One final screenshot only, no per-field screenshots. After submit, one get_text for confirmation then finish — do not linger.",
         "",
     ]
     for f in fields:

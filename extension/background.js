@@ -463,8 +463,33 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true; // keep sendResponse alive for the async work above
   }
 
-  if (msg.type === "FILL_FIELDS") {
+  if (msg.type === "VERIFY_VALUES") {
+    // Post-report read-back: did the filled values survive? Catches
+    // Live Server auto-reload wipes (server writes session JSON ->
+    // :5500 reloads tab -> form emptied after a "success" message).
     (async () => {
+      try {
+        const tab = await getActiveTab();
+        const [{ result }] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (selectors) => selectors.map((sel) => {
+            let el = null;
+            try { el = document.querySelector(sel); } catch { return { selector: sel, present: false, value: null }; }
+            if (!el) return { selector: sel, present: false, value: null };
+            if (el.type === "checkbox" || el.type === "radio") return { selector: sel, present: true, value: String(el.checked) };
+            return { selector: sel, present: true, value: el.value ?? el.textContent ?? null };
+          }),
+          args: [msg.selectors || []],
+        });
+        sendResponse({ ok: true, values: result, url: tab.url });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === "FILL_FIELDS") {    (async () => {
       try {
         const tab = await getActiveTab();
         const [{ result }] = await chrome.scripting.executeScript({

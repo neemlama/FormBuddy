@@ -34,7 +34,7 @@ from typing import Any, Literal
 
 from strands import tool
 
-from agent.tools.audit_log import log_decision
+from agent.tools.audit_log import log_decision, log_system_decision
 from agent.tools.form_filler import fill_and_submit_form
 from agent.tools.session_store import get_session, save_pending_proposal, update_status
 
@@ -174,7 +174,7 @@ def resume_after_approval(
     url = proposal["url"]
     fill_mode = proposal.get("fill_mode", "cloud")
 
-    log_decision(
+    log_system_decision(
         session_id=session_id,
         actor="human",
         action=f"submission_{decision}",
@@ -207,6 +207,60 @@ def resume_after_approval(
     return _finalize_fill_result(session_id, url, result, note)
 
 
+def begin_cloud_approval(session_id: str, note: str = "") -> dict[str, Any]:
+    """Log human approval and park status on "approved" without filling.
+
+    Lets POST /decide return instantly while a background thread runs
+    finish_cloud_fill(). Frontend polls GET session until submitted/failed.
+    Only valid from pending_approval + fill_mode cloud.
+    """
+    session = get_session(session_id)
+    if session is None:
+        raise KeyError(f"No pending proposal found for session_id={session_id!r}")
+    if session["status"] != "pending_approval":
+        raise ValueError(
+            f"Session {session_id} was already resolved (status={session['status']!r}); "
+            "refusing to process the same decision twice."
+        )
+    if session["proposal"].get("fill_mode", "cloud") != "cloud":
+        raise ValueError(f"Session {session_id} is not cloud mode; use resume_after_approval.")
+    url = session["proposal"]["url"]
+    log_system_decision(
+        session_id=session_id,
+        actor="human",
+        action="submission_approved",
+        detail={"note": note, "url": url},
+        requires_human_approval=False,
+    )
+    return update_status(session_id, status="approved", decision_note=note)
+
+
+def finish_cloud_fill(session_id: str) -> str:
+    """Run the browser fill for an already-approved cloud session.
+
+    Called in a background thread after begin_cloud_approval(). Never
+    called by the agent. Any exception becomes a failed finalization so
+    the UI can offer Retry instead of hanging.
+    """
+    session = get_session(session_id)
+    if session is None:
+        raise KeyError(f"No session found for session_id={session_id!r}")
+    if session["status"] != "approved":
+        raise ValueError(
+            f"Session {session_id} is not awaiting cloud fill (status={session['status']!r})."
+        )
+    proposal = session["proposal"]
+    url = proposal["url"]
+    note = session.get("decision_note", "")
+    try:
+        result = fill_and_submit_form(
+            session_id=session_id, url=url, fields=proposal["fields"], submit_selector=proposal["submit_selector"]
+        )
+    except Exception as e:
+        result = {"ok": False, "confirmation_text": None, "notes": f"Browser agent crashed: {e}"}
+    return _finalize_fill_result(session_id, url, result, note)
+
+
 def retry_failed_session(session_id: str) -> dict[str, Any]:
     """Re-queue a failed submission for one more attempt.
 
@@ -227,7 +281,7 @@ def retry_failed_session(session_id: str) -> dict[str, Any]:
             f"Session {session_id} is not failed (status={session['status']!r}); "
             "only submission_failed can be retried."
         )
-    log_decision(
+    log_system_decision(
         session_id=session_id,
         actor="human",
         action="retry_requested",

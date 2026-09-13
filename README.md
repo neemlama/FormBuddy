@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-41%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-48%20passed-brightgreen.svg)](tests/)
 
 ## The problem — who it's for, why it matters
 
@@ -41,7 +41,7 @@ Two modes, **one brain** — same orchestrator, same approval gate, same audit t
 | On approval | AgentCore Browser fills **and submits** | fills only — **you** click Submit |
 | Profile | in chat (or saved locally in web vault) | `chrome.storage.local`, sent only on Analyze |
 
-**Model tiering (cost optimization):** Orchestrator (reasoning/matching) runs on the default model (Sonnet-class); isolated sub-agents for inspection (`form_inspector.py:35`) and filling (`form_filler.py:30`) run on **Haiku** — structured extraction doesn't need frontier reasoning and the browser loop is token-heavy. Live-verified to keep Bedrock costs low.
+**Model tiering (cost optimization):** Haiku 4.5 everywhere by default — orchestrator (`agent/orchestrator.py:122`), inspection (`form_inspector.py:35`), filling (`form_filler.py:30`) — ~5x cheaper than Sonnet, which stays opt-in via `BEDROCK_ORCHESTRATOR_MODEL_ID`. Live-verified to keep Bedrock costs low.
 
 **State:** `api/main.py:44` FastAPI thin wrapper over `agent/` (no logic duplicated). Session state in `agent/tools/session_store.py:7` — local JSON (`infra/seed-data/sessions.local/`) for demo, DynamoDB / AgentCore Memory for deployed env (drop-in swap).
 
@@ -78,7 +78,7 @@ Screenshots: `screenshots/` (extension sidepanel, filled form, proposal card, ge
 
 ```
 agent/            Orchestrator + tools (form inspection, filling, approval, audit, doc parser)
-  orchestrator.py  System prompt + tool wiring (Haiku sub-agents, Sonnet orchestrator)
+  orchestrator.py  System prompt + tool wiring (Haiku throughout, Sonnet opt-in)
   tools/
     proposal.py        Approval boundary (propose/resume/record_extension)
     form_inspector.py  Cloud vs extension inspection (both Haiku)
@@ -90,7 +90,7 @@ api/               FastAPI backend — thin HTTP wrapper around agent/, serves f
 frontend/          Web chat UI (cloud mode) + local profile vault
 extension/         Chrome extension (Manifest V3) side panel + background service worker
 demo/mock-rsvp/    Demo form (text/email/tel/number/select/textarea/checkbox)
-tests/             pytest 41 tests, zero AWS dependency + manual live-check scripts
+tests/             pytest 48 tests, zero AWS dependency + manual live-check scripts
 docs/              Architecture diagram, safety notes, deploy guide
 infra/             Seed data (audit log, sessions — local demo backend)
 ```
@@ -120,7 +120,7 @@ uv run python -m agent.orchestrator --resume <session_id> approved
 ## Testing
 
 ```bash
-uv run pytest tests/ -q   # 41 passed, no AWS needed
+uv run pytest tests/ -q   # 48 passed, no AWS needed
 # Manual live checks (need Bedrock + AgentCore Browser):
 # uv run python tests/manual_browser_diagnostic.py
 # uv run python tests/manual_form_filler_livecheck.py

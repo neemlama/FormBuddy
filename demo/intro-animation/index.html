@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FormBuddy Intro — Maya story (screen-record me)</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --accent:#22c55e; --warn:#f59e0b; --bad:#ef4444; }
+  * { box-sizing:border-box; font-family: system-ui, Segoe UI, Arial, sans-serif; }
+  body { margin:0; background:var(--bg); color:#e2e8f0; display:flex; flex-direction:column; align-items:center; min-height:100vh; }
+  header { padding:12px; font-size:14px; color:#94a3b8; }
+  #stage { width:1280px; max-width:96vw; aspect-ratio:16/9; background:linear-gradient(#0f172a,#1e293b); border:1px solid #334155; border-radius:12px; position:relative; overflow:hidden; }
+  .scene { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:40px; opacity:0; transition:opacity .6s; padding:40px; }
+  .scene.active { opacity:1; }
+  .caption { position:absolute; bottom:18px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.7); padding:10px 18px; border-radius:8px; font-size:20px; max-width:90%; text-align:center; }
+  .char { font-size:110px; }
+  .forms { display:flex; flex-direction:column; gap:10px; }
+  .form-card { background:white; color:#111; border-radius:8px; padding:12px 16px; width:260px; box-shadow:0 6px 20px rgba(0,0,0,.4); animation: pile 1s infinite alternate; }
+  .form-card:nth-child(2){ animation-delay:.2s } .form-card:nth-child(3){ animation-delay:.4s }
+  @keyframes pile { from { transform:rotate(-1.5deg) translateY(0);} to { transform:rotate(1.5deg) translateY(-6px);} }
+  .stamp { display:inline-block; padding:2px 8px; border:2px solid var(--bad); color:var(--bad); border-radius:6px; font-weight:800; transform:rotate(-8deg); animation: stampIn .5s infinite alternate; }
+  @keyframes stampIn { from { opacity:.6 } to { opacity:1 } }
+  .buddy { font-size:120px; animation: float 1.2s infinite alternate; }
+  @keyframes float { from { transform:translateY(0)} to { transform:translateY(-12px)} }
+  .check { color:var(--accent); font-weight:800; font-size:28px; }
+  .controls { margin:12px; display:flex; gap:8px; align-items:center; }
+  button { background:#22c55e; border:0; padding:10px 16px; border-radius:8px; font-weight:700; cursor:pointer; }
+  button.secondary { background:#334155; color:white; }
+  #timeline { color:#94a3b8; font-size:13px; }
+</style>
+</head>
+<body>
+<header>Open this file, press Play, screen-record with OBS / Xbox Game Bar (Win+G) at 1080p. Voiceover script matches docs/video-script.md 0:00-0:50.</header>
+<div id="stage">
+  <div class="scene" id="s1">
+    <div class="char">👩‍🎓</div>
+    <div>
+      <h1>Maya, 20, Hetauda</h1>
+      <p>10–15 forms a year: ward letters, scholarships, exam registrations.</p>
+      <div class="forms">
+        <div class="form-card">Ward Residency Letter <br><small>Name… Citizenship… Ward…</small></div>
+        <div class="form-card">Campus Scholarship <br><small>Name… Marks… Income…</small></div>
+        <div class="form-card">Exam Registration <br><small>Name… Photo… <span class="stamp">REJECTED — guessed field</span></small></div>
+      </div>
+    </div>
+    <div class="caption">In Nepal, Maya fills the same details over and over. One guess = rejection.</div>
+  </div>
+  <div class="scene" id="s2">
+    <div class="char">😩</div>
+    <div>
+      <h1>×30 for a cooperative</h1>
+      <p>Same name, citizenship, ward — different wording, different sites.</p>
+      <p style="font-size:42px">📄📄📄 → ⏰ 4 min each → ~2 hrs per batch</p>
+    </div>
+    <div class="caption">Autofill pastes blindly and never asks before submitting.</div>
+  </div>
+  <div class="scene" id="s3">
+    <div class="buddy">🙏</div>
+    <div>
+      <h1>Meet FormBuddy</h1>
+      <p>Reads the <b>real form live</b> → matches your profile + document photo → drafts exact plan.</p>
+      <p class="check">✔ Never invents &nbsp; ✔ Waits for approval &nbsp; ✔ Full audit</p>
+      <p>~4 min → 45 sec per form</p>
+    </div>
+    <div class="caption">Good Neighbor agent: autonomous until consequential, then stops for you.</div>
+  </div>
+</div>
+<div class="controls">
+  <button id="play">▶ Play 30s intro</button>
+  <button id="replay" class="secondary">↻ Replay</button>
+  <span id="timeline">3 scenes × 10s. Record, then cut to real demo per docs/video-script.md.</span>
+</div>
+<script>
+  const scenes = ["s1","s2","s3"].map(id=>document.getElementById(id));
+  let t = 0, timer = null;
+  function show(i){ scenes.forEach((s,k)=>s.classList.toggle("active", k===i)); }
+  function play(){
+    clearInterval(timer); t = 0; show(0);
+    timer = setInterval(()=>{
+      t++;
+      if(t>=scenes.length){ clearInterval(timer); return; }
+      show(t);
+    }, 10000);
+  }
+  document.getElementById("play").onclick = play;
+  document.getElementById("replay").onclick = play;
+  show(0);
+</script>
+</body>
+</html>

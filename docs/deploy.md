@@ -6,7 +6,7 @@
 
 ```bash
 # 0. Stay local for dev
-uv run pytest tests/ -q   # 41 tests, $0
+uv run pytest tests/ -q   # 48 tests, $0
 uv run uvicorn api.main:app --port 8000   # local demo at http://localhost:8000
 
 # 1. Only on video day, create DynamoDB tables (one-time, free tier, PAY_PER_REQUEST)

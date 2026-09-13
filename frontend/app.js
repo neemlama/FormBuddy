@@ -103,8 +103,8 @@ if (fileUploadBtn) fileUploadBtn.addEventListener("click", async ()=>{
   fileUploadBtn.disabled=true; fileUploadNote.hidden=false; fileUploadNote.textContent="Uploading...";
   for(const f of fileInput.files){
     const fd=new FormData(); fd.append("file", f);
-    try{ const r=await fetch("/api/files/upload",{method:"POST", body: fd}); if(!r.ok){ fileUploadNote.textContent="Failed "+f.name+": "+(await r.text()).slice(0,120);} else fileUploadNote.textContent="Uploaded "+f.name+" ✅";}
-    catch(e){ fileUploadNote.textContent="Error "+e; }
+    try{ const r=await fetch("/api/files/upload",{method:"POST", body: fd}); if(!r.ok){ fileUploadNote.textContent="Failed "+f.name+": HTTP "+r.status+" "+(await r.text()).slice(0,120);} else fileUploadNote.textContent="Uploaded "+f.name+" ✅";}
+    catch(e){ fileUploadNote.textContent="Backend not reachable — is uvicorn running on :8000? Start: uv run uvicorn api.main:app --port 8000 ("+e+")"; }
   }
   fileInput.value=""; fileUploadBtn.disabled=false;
   setTimeout(()=>fileUploadNote.hidden=true,2500);
@@ -230,6 +230,19 @@ async function refreshSession() {
     approveBtn.disabled = false;
     rejectBtn.disabled = false;
     proposalBody.innerHTML = renderProposalBody(p);
+  } else if (session.status === "approved") {
+    // Cloud fill running in background (button already clicked) — never
+    // hide the card here; show live progress instead of silence.
+    proposalCard.hidden = false;
+    proposalActions.hidden = true;
+    proposalBody.innerHTML = session.proposal ? renderProposalBody(session.proposal) : "—";
+    decisionResult.hidden = false;
+    decisionResult.className = "decision-result pending";
+    decisionResult.textContent = "⏳ Approved — filling via live browser… watch Agent Activity for progress (typical 60-120s).";
+    if (!window._fbPolling) {
+      window._fbPolling = true;
+      pollFillProgress().finally(() => { window._fbPolling = false; });
+    }
   } else if (["submitted", "rejected", "submission_failed"].includes(session.status)) {
     proposalCard.hidden = false;
     proposalActions.hidden = true; // decision is final -- no point showing a disabled note+buttons
@@ -299,6 +312,13 @@ async function decide(decision) {
     } else if (data.status === "rejected") {
       decisionResult.className = "decision-result pending";
       decisionResult.textContent = "❌ " + data.message;
+    } else if (data.status === "approved") {
+      // Cloud fill runs in background (1-2 min) — poll until terminal state.
+      if (!window._fbPolling) {
+        window._fbPolling = true;
+        pollFillProgress().finally(() => { window._fbPolling = false; });
+      }
+      return;
     } else {
       decisionResult.className = "decision-result error";
       decisionResult.textContent = "⚠️ " + data.message;
@@ -310,6 +330,33 @@ async function decide(decision) {
     refreshActivity();
     refreshSession(); // re-render from authoritative server state (hides actions once resolved)
   }
+}
+
+async function pollFillProgress() {
+  const started = Date.now();
+  for (let i = 0; i < 75; i++) { // up to ~5 min at 4s intervals
+    await new Promise((r) => setTimeout(r, 4000));
+    const elapsed = Math.round((Date.now() - started) / 1000);
+    try {
+      const [sres, ares] = await Promise.all([
+        fetch(`/api/session/${encodeURIComponent(sessionId)}`),
+        fetch(`/api/session/${encodeURIComponent(sessionId)}/audit`),
+      ]);
+      const session = await sres.json();
+      const entries = await ares.json().catch(() => []);
+      const last = entries.length ? entries[entries.length - 1].action : "filling";
+      if (["submitted", "rejected", "submission_failed"].includes(session.status)) {
+        refreshActivity();
+        refreshSession();
+        return;
+      }
+      decisionResult.hidden = false;
+      decisionResult.className = "decision-result pending";
+      decisionResult.textContent = `⏳ Filling via live browser… ${elapsed}s elapsed (last step: ${last}). You can keep this tab open — typical 60-120s.`;
+      refreshActivity();
+    } catch {}
+  }
+  decisionResult.textContent += " Still not done after ~5 min — check Agent Activity or Retry.";
 }
 
 approveBtn.addEventListener("click", () => decide("approved"));

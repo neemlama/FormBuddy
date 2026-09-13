@@ -126,8 +126,32 @@ Google Forms type mapping (detect via aria + structure, not input type alone):
 """
 
 
+def _strip_thinking(text: str) -> str:
+    """Remove <thinking>...</thinking> blocks some models emit before JSON."""
+    import re
+
+    return re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+
+
+def _trim_html(html: str, limit: int = 120_000) -> str:
+    """Strip scripts/styles and truncate huge pages keeping form content.
+
+    Live 2026-09-13: full Google Forms HTML choked the inspector into
+    prose instead of JSON. Scripts/styles never contain fields.
+    """
+    import re
+
+    cleaned = re.sub(r"<script.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r"<style.*?</style>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+    if len(cleaned) <= limit:
+        return cleaned
+    # Keep head start (form usually early) + tail (submit button often late)
+    head = limit * 3 // 4
+    return cleaned[:head] + "\n<!-- trimmed -->\n" + cleaned[-(limit - head) :]
+
+
 def _parse_json(raw_text: str) -> dict[str, Any]:
-    text = raw_text.strip()
+    text = _strip_thinking(raw_text.strip())
     if text.startswith("```"):
         text = text.strip("`")
         if text.lower().startswith("json"):
@@ -136,9 +160,27 @@ def _parse_json(raw_text: str) -> dict[str, Any]:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
+    # Find the largest {...} span; models sometimes wrap JSON in prose
+    # on both sides despite "ONLY JSON" instructions.
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end != -1 and end > start:
-        return json.loads(text[start : end + 1])
+        candidate = text[start : end + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            # One last attempt: drop trailing garbage after balanced braces
+            depth, stop = 0, None
+            for i, ch in enumerate(candidate):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        stop = i + 1
+                        break
+            if stop:
+                return json.loads(candidate[:stop])
+            raise
     raise json.JSONDecodeError("no JSON object found in model output", text, 0)
 
 
@@ -199,7 +241,16 @@ def inspect_form(url: str, region: str = "us-east-1") -> dict[str, Any]:
             browser_tool._cleanup()
         except Exception:
             pass
-    return _inspection_result_from_response(response)
+    result = _inspection_result_from_response(response)
+    if not result["ok"] and "valid JSON" in result.get("notes", ""):
+        # One re-ask: model produced prose instead of JSON (seen live on
+        # heavy Google Forms pages). Cheap, no browser involved.
+        try:
+            retry = inspector("Your last reply was not valid JSON. Reply again with ONLY the JSON object, no prose.")
+            return _inspection_result_from_response(retry)
+        except Exception:
+            pass
+    return result
 
 
 @tool
@@ -219,5 +270,13 @@ def inspect_provided_html(html: str, url: str = "") -> dict[str, Any]:
         "submit_selector": str|None, "notes": str}.
     """
     inspector = Agent(system_prompt=_HTML_INSPECTOR_PROMPT, callback_handler=None, model=_HAIKU_MODEL_ID)
+    html = _trim_html(html)
     response = inspector(f"URL (context only, do not fetch): {url or '(not given)'}\n\nPage HTML:\n{html}")
-    return _inspection_result_from_response(response)
+    result = _inspection_result_from_response(response)
+    if not result["ok"] and "valid JSON" in result.get("notes", ""):
+        try:
+            retry = inspector("Your last reply was not valid JSON. Reply again with ONLY the JSON object, no prose.")
+            return _inspection_result_from_response(retry)
+        except Exception:
+            pass
+    return result

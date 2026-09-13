@@ -31,6 +31,20 @@ function fillFieldsInPage(fields) {
   function findEl(f) {
     let el = null;
     try { el = document.querySelector(f.selector); } catch {}
+    // Google Forms text questions: NEVER return the hidden entry input.
+    // Its Closure framework ignores programmatic changes there and the
+    // visible box stays empty (verified live 2026-09-14: 5 "filled", form
+    // visibly empty). Target the visible input in the same listitem instead.
+    const textLike = ['text','email','tel','number','textarea','date','time'].includes(f.field_type);
+    const m0 = (f.selector && f.selector.match(/entry\.(\d+)/)) || null;
+    if (textLike && m0) {
+      const holder0 = document.querySelector('[data-params*="' + m0[1] + '"]');
+      const li0 = holder0 ? (holder0.closest('[role="listitem"]') || holder0) : null;
+      if (li0) {
+        const vis0 = li0.querySelector('input[type="text"], input[type="email"], input[type="tel"], input[type="number"], textarea, input:not([type])');
+        if (vis0 && vis0.type !== 'hidden') return vis0;
+      }
+    }
     if (el && el.type === 'hidden' && el.name && el.name.includes('_sentinel')) {
       const li = el.closest('[role="listitem"]');
       if (li) {
@@ -49,8 +63,8 @@ function fillFieldsInPage(fields) {
     if (entryFull) {
       el = document.querySelector('[name="' + entryFull + '"]');
       if (el && el.type !== 'hidden') return el;
-      el = document.querySelector('textarea[name="' + entryFull + '"], input[name="' + entryFull + '"]');
-      if (el) return el;
+      el = document.querySelector('textarea[name="' + entryFull + '"], input[name="' + entryFull + '"]:not([type="hidden"])');
+      if (el && el.type !== 'hidden') return el;
       const holder = entryNum ? document.querySelector('[data-params*="' + entryNum + '"]') : null;
       if (holder) {
         const parent = holder.closest('[role="listitem"]') || holder.parentElement;
@@ -476,6 +490,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             let el = null;
             try { el = document.querySelector(sel); } catch { return { selector: sel, present: false, value: null }; }
             if (!el) return { selector: sel, present: false, value: null };
+            // Hidden entry inputs always read back whatever was set on them,
+            // even when the visible box is empty — read the visible input
+            // in the same question instead (false-success fix, 2026-09-14).
+            if (el.type === "hidden" && el.name) {
+              const li = el.closest('[role="listitem"]');
+              const vis = li && li.querySelector('input[type="text"], input[type="email"], input[type="tel"], input[type="number"], textarea, div[role="textbox"]');
+              if (vis) el = vis;
+            }
             if (el.type === "checkbox" || el.type === "radio") return { selector: sel, present: true, value: String(el.checked) };
             return { selector: sel, present: true, value: el.value ?? el.textContent ?? null };
           }),
@@ -508,7 +530,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
               href: window.location.href,
               title: document.title,
               inputs: document.querySelectorAll("input,select,textarea").length,
-              full_name_val: (document.querySelector("#full_name") || {}).value ?? null,
+              visible_text_filled: [...document.querySelectorAll('input[type="text"], input[type="email"], input[type="tel"], input[type="number"], textarea')].filter(e => e.offsetParent !== null && (e.value || "").trim() !== "").length,
             }),
           });
           diag = d.result;

@@ -299,7 +299,7 @@ $("authorize-btn").addEventListener("click", async () => {
     const filledTabUrl = fillResp.filled_tab_url || "";
     const diag = fillResp.diag || null;
     const diagLine = diag
-      ? `\n\nFiller saw page: ${diag.href || "?"} (${diag.inputs ?? "?"} inputs, #full_name=${JSON.stringify(diag.full_name_val)})`
+      ? `\n\nFiller saw page: ${diag.href || "?"} (${diag.inputs ?? "?"} inputs, visible text filled=${diag.visible_text_filled ?? "?"})`
       : "";
     thinking.remove();
 
@@ -322,7 +322,7 @@ $("authorize-btn").addEventListener("click", async () => {
       notes += (notes ? " | " : "") + "Auto-attached: " + af;
     }
     if (diag) {
-      notes += ` | diag: href=${diag.href || "?"} inputs=${diag.inputs ?? "?"} full_name=${JSON.stringify(diag.full_name_val)}`;
+      notes += ` | diag: href=${diag.href || "?"} inputs=${diag.inputs ?? "?"} visible_text_filled=${diag.visible_text_filled ?? "?"}`;
     }
 
     await fetch(`${BACKEND_URL}/api/session/${encodeURIComponent(sessionId)}/extension-result`, {

@@ -50,6 +50,46 @@ def read_local_entries(session_id: str | None = None) -> list[dict[str, Any]]:
     return entries
 
 
+def read_entries(session_id: str | None = None) -> list[dict[str, Any]]:
+    """Backend-aware audit read: DynamoDB when deployed, local JSONL in dev.
+
+    Used by the Runtime /invocations audit action so the judges' page sees
+    the activity feed. Tables are tiny (one row per decision), so a scan +
+    filter + timestamp sort is fine — no GSI needed.
+    """
+    if os.environ.get("AUDIT_LOG_SOURCE", "local") != "dynamodb":
+        return read_local_entries(session_id)
+    import boto3
+    from boto3.dynamodb.conditions import Attr
+    from decimal import Decimal
+
+    table_name = os.environ.get("AUDIT_LOG_TABLE_NAME", "formbuddy-audit-log")
+    table = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1")).Table(table_name)
+    items: list[dict[str, Any]] = []
+    kwargs: dict[str, Any] = {}
+    while True:
+        resp = table.scan(**kwargs)
+        items.extend(resp.get("Items", []))
+        if "LastEvaluatedKey" not in resp:
+            break
+        kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+    def _norm(v: Any) -> Any:
+        if isinstance(v, Decimal):
+            return int(v) if v % 1 == 0 else float(v)
+        if isinstance(v, dict):
+            return {k: _norm(x) for k, v in v.items()}
+        if isinstance(v, list):
+            return [_norm(x) for x in v]
+        return v
+
+    entries = [_norm(e) for e in items]
+    if session_id is not None:
+        entries = [e for e in entries if e.get("session_id") == session_id]
+    entries.sort(key=lambda e: e.get("timestamp", 0))
+    return entries
+
+
 @tool
 def log_decision(
     session_id: str,

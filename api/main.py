@@ -39,7 +39,7 @@ from pydantic import BaseModel
 from strands import Agent
 
 from agent.orchestrator import build_agent
-from agent.tools.audit_log import read_local_entries
+from agent.tools.audit_log import read_entries, read_local_entries
 from agent.tools.file_store import delete_file, get_file_bytes, get_file_path, list_files, save_file
 from agent.tools.profile_store import load_profile, profile_as_text, save_profile
 from agent.tools.proposal import (
@@ -131,25 +131,77 @@ def ping() -> dict[str, str]:
 
 @app.post("/invocations")
 async def invocations(request: Request) -> dict[str, Any]:
-    """AgentCore Runtime entrypoint.
+    """AgentCore Runtime entrypoint. Action-routed so the judges' page can
+    run the full flow through one endpoint (AgentCore only routes here):
 
-    Accepts the raw body because AgentCore's proxy envelope is not plain
-    JSON (seen live: first body byte 0xb1). Tries JSON, then {"input": ...}
-    envelope, then raw text as the message.
+    {"action": "chat", "session_id": ..., "message": ...} (default)
+    {"action": "session", "session_id": ...}
+    {"action": "decide", "session_id": ..., "decision": "approved"|"rejected", "note": ""}
+    {"action": "retry", "session_id": ...}
+    {"action": "audit", "session_id": ...}
+
+    Note: pass payloads via SDK (boto3) as raw JSON bytes. The AWS CLI
+    --payload blob flag base64-mangles JSON files; if you must use the CLI,
+    pipe base64 and decode server-side is NOT done here.
     """
+    import threading
+
     raw = await request.body()
     payload: dict[str, Any] = {}
     try:
         parsed = json.loads(raw.decode("utf-8"))
         payload = parsed.get("input", parsed) if isinstance(parsed, dict) else {}
     except Exception:
-        print(f"WARN /invocations non-JSON body len={len(raw)} head={raw[:64]!r} tail={raw[-64:]!r}", flush=True)
+        print(f"WARN /invocations non-JSON body len={len(raw)}", flush=True)
         try:
             payload = {"message": raw.decode("utf-8", errors="replace")}
         except Exception:
             payload = {}
+
+    action = str(payload.get("action", "chat"))
+    session_id = str(payload.get("session_id", "runtime-default"))
+
+    if action == "session":
+        session = get_session(session_id)
+        return session if session is not None else {"session_id": session_id, "status": "none"}
+
+    if action == "audit":
+        return {"entries": read_entries(session_id)}
+
+    if action == "retry":
+        try:
+            record = retry_failed_session(session_id)
+        except KeyError as e:
+            return {"ok": False, "error": str(e)}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "status": record["status"]}
+
+    if action == "decide":
+        decision = payload.get("decision", "approved")
+        note = str(payload.get("note", ""))
+        if decision not in ("approved", "rejected"):
+            return {"ok": False, "error": "decision must be approved|rejected"}
+        session = get_session(session_id)
+        if session is not None and decision == "approved" and session["status"] == "pending_approval" and session.get("proposal", {}).get("fill_mode", "cloud") == "cloud":
+            try:
+                begin_cloud_approval(session_id, note=note)
+            except (KeyError, ValueError) as e:
+                return {"ok": False, "error": str(e)}
+            thread = threading.Thread(target=finish_cloud_fill, args=(session_id,), daemon=True)
+            thread.start()
+            return {"ok": True, "status": "approved", "message": "Approved — filling in background. Poll action=session."}
+        try:
+            message = resume_after_approval(session_id, decision=decision, note=note)
+        except KeyError as e:
+            return {"ok": False, "error": str(e)}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        session = get_session(session_id)
+        return {"ok": True, "status": session["status"] if session else "unknown", "message": message}
+
     req = ChatRequest(
-        session_id=str(payload.get("session_id", "runtime-default")),
+        session_id=session_id,
         message=str(payload.get("message", "")),
         page_html=payload.get("page_html"),
         page_url=payload.get("page_url"),

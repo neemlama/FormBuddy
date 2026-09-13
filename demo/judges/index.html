@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FormBuddy — Judges Demo (live on AgentCore)</title>
+<style>
+  body { font-family: system-ui, Segoe UI, Arial, sans-serif; max-width: 760px; margin: 24px auto; padding: 0 16px; color: #0f172a; }
+  header { background: #0f766e; color: white; padding: 18px 20px; border-radius: 10px; }
+  #log { border: 1px solid #d6dde3; border-radius: 8px; padding: 12px; min-height: 120px; margin: 16px 0; white-space: pre-wrap; }
+  #proposal { border: 2px solid #d97706; border-radius: 8px; padding: 12px; margin: 16px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td, th { border: 1px solid #d6dde3; padding: 6px 8px; text-align: left; }
+  .row { display: flex; gap: 8px; margin-top: 12px; }
+  input[type=text] { flex: 1; padding: 10px; font-size: 15px; }
+  button { padding: 10px 18px; font-size: 15px; cursor: pointer; }
+  #activity { font-size: 13px; color: #475569; }
+  .hint { font-size: 13px; color: #475569; }
+</style>
+</head>
+<body>
+<header>
+  <h1 style="margin:0">FormBuddy — live judges demo</h1>
+  <p style="margin:6px 0 0">Good Neighbor agent on AgentCore Runtime. Paste the demo form URL + your details, review the plan, Approve.</p>
+</header>
+<p class="hint">Try: <code>https://formbuddy-demo-rsvp.s3.amazonaws.com/index.html — My name is Alex Rai, email alex@example.com, phone 9800000000, 2 guests, vegetarian, T-shirt L</code></p>
+<div id="log"></div>
+<div id="proposal" hidden></div>
+<div class="row">
+  <input id="msg" type="text" placeholder="Paste form URL + details, press Send" autocomplete="off" />
+  <button id="send">Send</button>
+</div>
+<h3>Agent activity</h3>
+<ul id="activity"></ul>
+<script>
+const API = "https://3prwbzu0od.execute-api.us-east-1.amazonaws.com/prod/invoke";
+const sessionId = "judge-" + Math.random().toString(36).slice(2, 10);
+const log = (t) => { const el = document.getElementById("log"); el.textContent += t + "\n"; el.scrollTop = el.scrollHeight; };
+async function call(payload) {
+  const r = await fetch(API, { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ session_id: sessionId, ...payload }) });
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    throw new Error("HTTP " + r.status + " " + t.slice(0, 200));
+  }
+  return r.json();
+}
+// Gateway caps at 30s but form inspection takes 60-120s. The agent keeps
+// working server-side, so on timeout we poll until a proposal lands.
+async function sendChatWithPoll(message) {
+  try {
+    return await call(API, { action: "chat", message });
+  } catch (e) {
+    log("Still analyzing (live browser read takes 1-2 min) — polling for the proposal…");
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 8000));
+      const s = await refresh().catch(() => null);
+      if (s && s.status === "pending_approval") return { reply: null, polled: true };
+      if (s && ["submitted", "submission_failed", "rejected"].includes(s.status)) return { reply: null, polled: true };
+    }
+    throw e;
+  }
+}
+async function refresh() {
+  const s = await call({ action: "session" });
+  if (s.status === "pending_approval" && s.proposal) showProposal(s.proposal);
+  else document.getElementById("proposal").hidden = true;
+  const a = await call({ action: "audit" });
+  document.getElementById("activity").innerHTML = (a.entries || []).map(e => `<li>${e.actor}: ${e.action}</li>`).join("");
+  return s;
+}
+function showProposal(p) {
+  const rows = (p.fields || []).map(f => `<tr><td>${f.label}${f.required ? " *" : ""}</td><td>${f.value ?? "<i>empty</i>"}</td></tr>`).join("");
+  document.getElementById("proposal").innerHTML =
+    `<b>Proposed submission</b><br><a href="${p.url}" target="_blank">${p.url}</a><br><br>${p.summary_for_human}` +
+    `<table style="margin-top:8px"><tr><th>Field</th><th>Value</th></tr>${rows}</table>` +
+    `<div class="row"><button id="ap">Approve & Submit</button><button id="rj">Reject</button></div><div id="dec"></div>`;
+  document.getElementById("proposal").hidden = false;
+  document.getElementById("ap").onclick = () => decide("approved");
+  document.getElementById("rj").onclick = () => decide("rejected");
+}
+async function decide(d) {
+  document.getElementById("dec").textContent = d === "approved" ? "Approved — filling via live browser (60-120s)…" : "Rejecting…";
+  const r = await call({ action: "decide", decision: d });
+  log((r.ok ? "OK: " : "ERR: ") + (r.message || r.error || r.status));
+  poll();
+}
+async function poll() {
+  for (let i = 0; i < 40; i++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const s = await refresh();
+    if (["submitted", "rejected", "submission_failed"].includes(s.status)) {
+      log("Final status: " + s.status);
+      if (s.status === "submission_failed") {
+        document.getElementById("proposal").hidden = false;
+        document.getElementById("proposal").innerHTML += `<div class="row"><button onclick="retry()">Retry submission</button></div>`;
+      }
+      return;
+    }
+  }
+}
+async function retry() {
+  await call({ action: "retry" });
+  log("Re-queued — review and Approve again.");
+  refresh();
+}
+document.getElementById("send").onclick = async () => {
+  const m = document.getElementById("msg").value.trim();
+  if (!m) return;
+  document.getElementById("msg").value = "";
+  log("You: " + m);
+  log("Thinking…");
+  try {
+    const r = await sendChatWithPoll(m);
+    if (r.reply) log("FormBuddy: " + r.reply);
+    else log("Proposal is ready below — review and Approve.");
+  } catch (e) {
+    log("Error: " + e.message + " — try New Session (reload page).");
+  }
+  refresh().catch(() => {});
+};
+log("Session " + sessionId + " ready.");
+</script>
+</body>
+</html>

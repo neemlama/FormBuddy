@@ -71,13 +71,19 @@ def save_pending_proposal(session_id: str, proposal: dict[str, Any]) -> dict[str
     to propose something new after a rejection must use a new session_id.
     """
     existing = get_session(session_id)
-    if existing is not None and existing["status"] != "pending_approval":
+    if existing is not None and existing["status"] not in ("pending_approval", "chatting", "none"):
         raise ValueError(
             f"Session {session_id} was already resolved (status={existing['status']!r}); "
             "cannot overwrite a decided session. Use a new session_id for a new proposal."
         )
 
     record = {"session_id": session_id, "status": "pending_approval", "proposal": proposal, "decision_note": ""}
+    # Preserve multi-turn context across the chatting -> pending_approval transition
+    if existing is not None:
+        if isinstance(existing.get("history"), list):
+            record["history"] = existing["history"][-10:]
+        if existing.get("last_form_url"):
+            record["last_form_url"] = existing["last_form_url"]
     _write(record)
     return record
 

@@ -48,7 +48,7 @@ async function call(payload) {
 // working server-side, so on timeout we poll until a proposal lands.
 async function sendChatWithPoll(message) {
   try {
-    return await call(API, { action: "chat", message });
+    return await call({ action: "chat", message });
   } catch (e) {
     log("Still analyzing (live browser read takes 1-2 min) — polling for the proposal…");
     for (let i = 0; i < 30; i++) {

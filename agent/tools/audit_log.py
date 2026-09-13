@@ -32,11 +32,30 @@ def _write_local(entry: dict[str, Any]) -> None:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+def _to_dynamo(value: Any) -> Any:
+    """Convert Python values to DynamoDB-safe types.
+
+    Live 2026-09-14: every audit PutItem failed because timestamp is a
+    float and DynamoDB rejects floats (TypeError, not a retryable error).
+    That left the audit table empty AND crashed POST decide with 500 since
+    begin_cloud_approval logs before updating status.
+    """
+    from decimal import Decimal
+
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {k: _to_dynamo(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_dynamo(v) for v in value]
+    return value
+
+
 def _write_dynamodb(entry: dict[str, Any]) -> None:
     import boto3  # local import: keeps boto3 off the hot path for local/test runs
 
     table_name = os.environ.get("AUDIT_LOG_TABLE_NAME", "formbuddy-audit-log")
-    boto3.resource("dynamodb").Table(table_name).put_item(Item=entry)
+    boto3.resource("dynamodb").Table(table_name).put_item(Item=_to_dynamo(entry))
 
 
 def read_local_entries(session_id: str | None = None) -> list[dict[str, Any]]:

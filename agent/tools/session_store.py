@@ -44,9 +44,22 @@ def _table():
     return boto3.resource("dynamodb").Table(table_name)
 
 
+def _to_dynamo(value: Any) -> Any:
+    """Recursively convert floats to Decimal — DynamoDB rejects floats."""
+    from decimal import Decimal
+
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {k: _to_dynamo(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_dynamo(v) for v in value]
+    return value
+
+
 def _write(record: dict[str, Any]) -> None:
     if _use_dynamodb():
-        _table().put_item(Item=record)
+        _table().put_item(Item=_to_dynamo(record))
         return
     path = _local_path(record["session_id"])
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -87,9 +87,14 @@ class ChatResponse(BaseModel):
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
+    import re
+
     agent = _get_agent(req.session_id)
     # Inject cross-session saved profile so future forms auto-fill without re-asking
-    saved = load_profile("default")
+    try:
+        saved = load_profile("default")
+    except Exception:
+        saved = {}
     profile_block = f"\n\nSAVED_PROFILE:\n{profile_as_text(saved)}" if saved else ""
     # Inject vault file list so orchestrator can auto-match file uploads without asking
     vault = list_files()
@@ -97,12 +102,30 @@ def chat(req: ChatRequest) -> ChatResponse:
     if vault:
         vault_lines = [f"{m['stored_as']} ({m['mime']}, {m['size']} bytes)" for m in vault[:20]]
         vault_block = "\n\nFILE_VAULT:\n" + "\n".join(vault_lines) + "\n(Use stored_as as value for file fields when label matches; e.g. 'Citizenship Photo' -> citizenship.jpg if present)"
-    prompt = f"session_id: {req.session_id}{profile_block}{vault_block}\n\n{req.message}"
+    # Multi-turn memory: _agents is in-process only and Runtime containers
+    # restart between invokes. Restore last form URL + recent history from
+    # the durable session record so turn 2 ("workshop") still knows turn 1's form.
+    _state = get_session(req.session_id)
+    history_block = ""
+    last_url = None
+    if _state is not None:
+        last_url = _state.get("last_form_url")
+        hist = _state.get("history", [])
+        if isinstance(hist, list) and hist:
+            lines = [f"{h.get('role', 'user')}: {h.get('content', '')[:800]}" for h in hist[-6:]]
+            history_block = "\n\nCONVERSATION_HISTORY:\n" + "\n".join(lines)
+    urls = re.findall(r"https?://[^\s,]+", req.message)
+    found_url = urls[0].rstrip(".,)") if urls else None
+    if not found_url and req.page_url:
+        found_url = req.page_url
+    effective_url = found_url or last_url
+    prompt = f"session_id: {req.session_id}{profile_block}{vault_block}{history_block}\n\n{req.message}"
+    if effective_url and not found_url:
+        prompt += f"\n\nCONTEXT_FORM_URL: {effective_url} (user referred to the same form as before — call inspect_form on it if needed, do not ask for URL again)"
     # Ground the agent in the real approval state so a chat "yes" can never
     # be mistaken for (or hallucinated into) a submission. Live 2026-09-13:
     # agent forged human approval + submitted messages while the real fill
     # was still running, and the UI still showed the Approve button.
-    _state = get_session(req.session_id)
     if _state is not None:
         _st = _state.get("status", "none")
         _ground = {
@@ -119,8 +142,24 @@ def chat(req: ChatRequest) -> ChatResponse:
         # look for -- selects inspect_provided_html + fill_mode="extension"
         # instead of inspect_form + fill_mode="cloud".
         prompt += f"\n\nPAGE_HTML_PROVIDED: (url: {req.page_url or 'unknown'})\n{req.page_html}"
+    # Save user turn BEFORE the slow agent call so a gateway 30s timeout that
+    # drops the response still leaves context for the poll/retry turn.
+    try:
+        from agent.tools.session_store import append_turn
+
+        append_turn(req.session_id, "user", req.message, last_form_url=found_url or last_url)
+    except Exception:
+        pass
     result = agent(prompt)
-    return ChatResponse(reply=str(result))
+    reply = str(result)
+    # Persist assistant turn for next invoke (stateless-safe). Keep proposal records intact.
+    try:
+        from agent.tools.session_store import append_turn
+
+        append_turn(req.session_id, "assistant", reply)
+    except Exception:
+        pass
+    return ChatResponse(reply=reply)
 
 
 @app.get("/ping")

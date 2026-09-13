@@ -90,3 +90,25 @@ def update_status(session_id: str, status: str, decision_note: str = "") -> dict
     record["decision_note"] = decision_note
     _write(record)
     return record
+
+
+def append_turn(session_id: str, role: str, content: str, last_form_url: str | None = None) -> dict[str, Any]:
+    """Persist multi-turn chat context so AgentCore Runtime stays stateless-safe.
+
+    _agents dict in api/main.py is in-process only — Runtime containers freeze,
+    scale, or restart between /invocations, wiping Strands Agent memory. This
+    stores the last 10 turns + last seen form URL in the same DynamoDB/local
+    record so chat() can re-inject context every turn.
+    """
+    record = get_session(session_id)
+    if record is None:
+        record = {"session_id": session_id, "status": "chatting", "proposal": None, "decision_note": ""}
+    history = record.get("history", [])
+    if not isinstance(history, list):
+        history = []
+    history.append({"role": role, "content": content[:4000]})
+    record["history"] = history[-10:]
+    if last_form_url:
+        record["last_form_url"] = last_form_url
+    _write(record)
+    return record

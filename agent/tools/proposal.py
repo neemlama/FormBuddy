@@ -24,9 +24,10 @@ NOT decorated with @tool — the agent does not call either on itself. Both
 are invoked externally, only after an actual human/extension event.
 
 Known gap, scoped out deliberately rather than silently: if a fill fails
-(network blip, page changed, etc.), status lands on "submission_failed"
-and stops there — no automatic retry yet. A human would need a manual
-follow-up path, not built in this pass.
+(network blip, page changed, etc.), status lands on "submission_failed".
+Use retry_failed_session() to re-queue it to "pending_approval" for one
+more human-approved attempt — the UI exposes this as Retry, so users never
+hang on a terminal failure.
 """
 
 from typing import Any, Literal
@@ -204,6 +205,36 @@ def resume_after_approval(
         session_id=session_id, url=url, fields=proposal["fields"], submit_selector=proposal["submit_selector"]
     )
     return _finalize_fill_result(session_id, url, result, note)
+
+
+def retry_failed_session(session_id: str) -> dict[str, Any]:
+    """Re-queue a failed submission for one more attempt.
+
+    Only valid from status "submission_failed" -> resets to
+    "pending_approval" with the same proposal intact. The next Approve
+    runs the fill again. Logs a human retry_requested entry so the audit
+    shows the loop explicitly.
+
+    Raises:
+        KeyError: no session found.
+        ValueError: session is not in submission_failed state.
+    """
+    session = get_session(session_id)
+    if session is None:
+        raise KeyError(f"No session found for session_id={session_id!r}")
+    if session["status"] != "submission_failed":
+        raise ValueError(
+            f"Session {session_id} is not failed (status={session['status']!r}); "
+            "only submission_failed can be retried."
+        )
+    log_decision(
+        session_id=session_id,
+        actor="human",
+        action="retry_requested",
+        detail={"url": session["proposal"]["url"]},
+        requires_human_approval=False,
+    )
+    return update_status(session_id, status="pending_approval", decision_note=session.get("decision_note", ""))
 
 
 def record_extension_fill_result(session_id: str, result: dict[str, Any], note: str = "") -> str:

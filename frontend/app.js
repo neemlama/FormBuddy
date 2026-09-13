@@ -215,6 +215,12 @@ function renderProposalBody(proposal) {
 async function refreshSession() {
   const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}`);
   const session = await res.json();
+  const retryBtn = document.getElementById("retry-btn");
+  const newConvBtn = document.getElementById("new-conv-btn");
+  const failureDetails = document.getElementById("failure-details");
+  if (retryBtn) retryBtn.hidden = true;
+  if (newConvBtn) newConvBtn.hidden = true;
+  if (failureDetails) { failureDetails.hidden = true; failureDetails.textContent = ""; }
 
   if (session.status === "pending_approval") {
     const p = session.proposal;
@@ -235,9 +241,23 @@ async function refreshSession() {
     } else if (session.status === "rejected") {
       decisionResult.className = "decision-result pending";
       decisionResult.textContent = "❌ Rejected. No submission was made.";
+      if (newConvBtn) newConvBtn.hidden = false;
     } else {
       decisionResult.className = "decision-result error";
-      decisionResult.textContent = "⚠️ Submission failed. See agent activity for details.";
+      decisionResult.textContent = "⚠️ Submission failed. You can retry or start fresh — you are not stuck.";
+      if (retryBtn) retryBtn.hidden = false;
+      if (newConvBtn) newConvBtn.hidden = false;
+      // Surface actual failure notes inline so user doesn't have to dig.
+      try {
+        const ar = await fetch(`/api/session/${encodeURIComponent(sessionId)}/audit`);
+        const entries = await ar.json();
+        const failed = [...entries].reverse().find((e) => e.action === "submission_failed");
+        const notes = failed?.detail?.notes || failed?.detail?.note || "";
+        if (notes && failureDetails) {
+          failureDetails.hidden = false;
+          failureDetails.textContent = "Details: " + notes.slice(0, 600);
+        }
+      } catch {}
     }
   } else {
     proposalCard.hidden = true;
@@ -294,6 +314,36 @@ async function decide(decision) {
 
 approveBtn.addEventListener("click", () => decide("approved"));
 rejectBtn.addEventListener("click", () => decide("rejected"));
+
+async function retrySubmission() {
+  const retryBtn = document.getElementById("retry-btn");
+  if (retryBtn) retryBtn.disabled = true;
+  decisionResult.hidden = false;
+  decisionResult.className = "decision-result pending";
+  decisionResult.textContent = "⏳ Re-queueing for another attempt...";
+  try {
+    const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}/retry`, { method: "POST" });
+    if (!res.ok) {
+      const err = await res.json();
+      decisionResult.className = "decision-result error";
+      decisionResult.textContent = "⚠️ Retry failed: " + (err.detail || "Request failed");
+      return;
+    }
+    await refreshSession();
+    // Auto re-submit with same approved plan so one click retries end-to-end.
+    await decide("approved");
+  } catch (err) {
+    decisionResult.className = "decision-result error";
+    decisionResult.textContent = "⚠️ " + err;
+  } finally {
+    if (retryBtn) retryBtn.disabled = false;
+  }
+}
+
+const _retryBtn = document.getElementById("retry-btn");
+if (_retryBtn) _retryBtn.addEventListener("click", retrySubmission);
+const _newConvBtn = document.getElementById("new-conv-btn");
+if (_newConvBtn) _newConvBtn.addEventListener("click", () => document.getElementById("new-session-btn").click());
 
 const ACTION_LABELS = {
   fields_matched: "🔎 Read the form and matched your details",

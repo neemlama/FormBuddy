@@ -41,7 +41,7 @@ from agent.orchestrator import build_agent
 from agent.tools.audit_log import read_local_entries
 from agent.tools.file_store import delete_file, get_file_bytes, get_file_path, list_files, save_file
 from agent.tools.profile_store import load_profile, profile_as_text, save_profile
-from agent.tools.proposal import record_extension_fill_result, resume_after_approval
+from agent.tools.proposal import record_extension_fill_result, resume_after_approval, retry_failed_session
 from agent.tools.session_store import get_session
 
 app = FastAPI(title="FormBuddy API")
@@ -140,6 +140,22 @@ def decide(session_id: str, req: DecisionRequest) -> dict[str, Any]:
 
     session = get_session(session_id)
     return {"message": message, "status": session["status"] if session else "unknown"}
+
+
+@app.post("/api/session/{session_id}/retry")
+def retry(session_id: str) -> dict[str, Any]:
+    """Re-queue a submission_failed session to pending_approval.
+
+    UI calls this from the Retry button so users are never stuck on the
+    terminal failure message — next Approve re-runs the fill.
+    """
+    try:
+        record = retry_failed_session(session_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return {"message": f"Session {session_id} re-queued — review and Approve again.", "status": record["status"]}
 
 
 # --- file vault (auto-upload support) ---

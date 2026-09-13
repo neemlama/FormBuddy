@@ -45,8 +45,8 @@ result = browser_tool.browser(
             # HTTPS S3 REST endpoint -- confirmed live that AgentCore Browser
             # blocks plain HTTP (net::ERR_BLOCKED_BY_CLIENT) and the
             # HTTP-only "website hosting" endpoint style along with it.
-            # Point at your own demo bucket (upload demo/mock-rsvp/ there).
-            "url": "https://formbuddy-demo-rsvp-ACCOUNT.s3.amazonaws.com/index.html",
+            # Point at the demo bucket (upload demo/mock-rsvp/ there).
+            "url": "https://formbuddy-demo-rsvp.s3.amazonaws.com/index.html",
         }
     }
 )

@@ -18,6 +18,7 @@ It has no submission tool. Submission only runs from resume_after_approval()
 reviewed the proposal — never by the agent on itself.
 """
 
+import os
 import sys
 
 from strands import Agent
@@ -114,11 +115,21 @@ does so. propose_form_fill only records a proposal for a human to \
 review — it does not submit anything either. For file uploads explicitly tell the user that files from the Document Vault will be auto-attached via the extension (no manual Add file needed); cloud mode still cannot access local vault files so extension is preferred for file-heavy forms.
 """
 
+# Orchestrator model: Haiku 4.5 by default for max savings (~$0.25/$1.25
+# per 1M vs Sonnet $2-3/$10-15). Override with BEDROCK_ORCHESTRATOR_MODEL_ID
+# to use Sonnet 5 for stronger reasoning:
+# us.anthropic.claude-sonnet-5
+_ORCHESTRATOR_MODEL_ID = os.getenv(
+    "BEDROCK_ORCHESTRATOR_MODEL_ID",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+)
+
 
 def build_agent() -> Agent:
     return Agent(
         system_prompt=SYSTEM_PROMPT,
         tools=[inspect_form, inspect_provided_html, log_decision, document_parser, propose_form_fill, remember_user_details],
+        model=_ORCHESTRATOR_MODEL_ID,
     )
 
 

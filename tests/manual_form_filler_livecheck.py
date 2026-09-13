@@ -18,7 +18,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 from agent.tools.form_inspector import inspect_form  # noqa: E402
 from agent.tools.proposal import propose_form_fill, resume_after_approval  # noqa: E402
 
-RSVP_URL = "https://sahayogi-demo-rsvp-557723775608.s3.amazonaws.com/index.html"
+RSVP_URL = "https://formbuddy-demo-rsvp.s3.amazonaws.com/index.html"
 
 USER_INFO = {
     "Full Name": "Alex Rai",

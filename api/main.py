@@ -15,6 +15,7 @@ demo; a multi-instance deployment would swap this for AgentCore Memory or
 similar without changing any endpoint's logic.
 """
 
+import json
 import sys
 from pathlib import Path
 from typing import Any, Literal
@@ -30,7 +31,7 @@ from typing import Any, Literal
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -120,6 +121,44 @@ def chat(req: ChatRequest) -> ChatResponse:
         prompt += f"\n\nPAGE_HTML_PROVIDED: (url: {req.page_url or 'unknown'})\n{req.page_html}"
     result = agent(prompt)
     return ChatResponse(reply=str(result))
+
+
+@app.get("/ping")
+def ping() -> dict[str, str]:
+    """AgentCore Runtime health check. No AWS, no agent — instant."""
+    return {"status": "Healthy"}
+
+
+@app.post("/invocations")
+async def invocations(request: Request) -> dict[str, Any]:
+    """AgentCore Runtime entrypoint.
+
+    Accepts the raw body because AgentCore's proxy envelope is not plain
+    JSON (seen live: first body byte 0xb1). Tries JSON, then {"input": ...}
+    envelope, then raw text as the message.
+    """
+    raw = await request.body()
+    payload: dict[str, Any] = {}
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+        payload = parsed.get("input", parsed) if isinstance(parsed, dict) else {}
+    except Exception:
+        print(f"WARN /invocations non-JSON body len={len(raw)} head={raw[:64]!r} tail={raw[-64:]!r}", flush=True)
+        try:
+            payload = {"message": raw.decode("utf-8", errors="replace")}
+        except Exception:
+            payload = {}
+    req = ChatRequest(
+        session_id=str(payload.get("session_id", "runtime-default")),
+        message=str(payload.get("message", "")),
+        page_html=payload.get("page_html"),
+        page_url=payload.get("page_url"),
+    )
+    reply = chat(req).reply
+    if isinstance(reply, bytes):  # defensive: surfaced live 2026-09-13 as 500 in encoders
+        print(f"WARN /invocations reply was bytes ({len(reply)}B), decoding with replace", flush=True)
+        reply = reply.decode("utf-8", errors="replace")
+    return {"reply": str(reply)}
 
 
 # --- profile endpoints (cross-session memory, zero AWS cost local) ---

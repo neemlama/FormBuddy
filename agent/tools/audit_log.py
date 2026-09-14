@@ -97,7 +97,7 @@ def read_entries(session_id: str | None = None) -> list[dict[str, Any]]:
         if isinstance(v, Decimal):
             return int(v) if v % 1 == 0 else float(v)
         if isinstance(v, dict):
-            return {k: _norm(x) for k, v in v.items()}
+            return {k: _norm(val) for k, val in v.items()}
         if isinstance(v, list):
             return [_norm(x) for x in v]
         return v

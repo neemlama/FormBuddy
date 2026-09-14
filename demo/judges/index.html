@@ -51,8 +51,8 @@ async function sendChatWithPoll(message) {
     return await call({ action: "chat", message });
   } catch (e) {
     log("Still analyzing (live browser read takes 1-2 min) — polling for the proposal…");
-    for (let i = 0; i < 30; i++) {
-      await new Promise(r => setTimeout(r, 8000));
+    for (let i = 0; i < 15; i++) {
+      await new Promise(r => setTimeout(r, 10000));
       const s = await refresh().catch(() => null);
       if (s && s.status === "pending_approval") return { reply: null, polled: true };
       if (s && ["submitted", "submission_failed", "rejected"].includes(s.status)) return { reply: null, polled: true };
@@ -85,8 +85,8 @@ async function decide(d) {
   poll();
 }
 async function poll() {
-  for (let i = 0; i < 40; i++) {
-    await new Promise(r => setTimeout(r, 5000));
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 12000));
     const s = await refresh();
     if (["submitted", "rejected", "submission_failed"].includes(s.status)) {
       log("Final status: " + s.status);
